@@ -21,6 +21,7 @@ setup(
     ],
     keywords='open energy efficiency meter',
     packages=find_packages(),
+    setup_requires=['numpy', 'pytest-runner'],
     install_requires=[
         'holidays',
         'lxml',
@@ -31,8 +32,10 @@ setup(
         'requests',
         'scipy',
         'scikit-learn',
+        'amimodels',
     ],
+    dependency_links=['http://github.com/openeemeter/amimodels/tarball/master#egg=amimodels',
+                      ],
     package_data={'': ['*.json', '*.gz']},
-    setup_requires=['pytest-runner'],
     tests_require=['pytest'],
 )
