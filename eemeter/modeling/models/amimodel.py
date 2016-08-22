@@ -161,11 +161,16 @@ class NormalHMMModel(object):
 
         self.plot()
 
+
+        # TODO: These parameters don't apply anymore; what should
+        # they be/do?
+        last_samples = {v.__name__: v.trace()[-1] for v in mcmc_step.stochastics}
         self.params = {
-            "coefficients": model_obj.coef_,
-            "intercept": model_obj.intercept_,
-            "X_design_info": X.design_info,
-            "formula": formula,
+            # We're dealing with samples now; use those, or their means?
+            # We'll use the last sample for each stochastic for now.
+            "init_params": init_params,
+            "last_samples": last_samples,
+            "X_design_infos": [X_.design_info for X_ in X_matrices],
         }
 
         output = {
@@ -191,12 +196,6 @@ class NormalHMMModel(object):
             Parameters found during model fit. If None, `.fit()` must be called
             before this method can be used.
 
-              - :code:`X_design_matrix`: patsy design matrix used in
-                formatting design matrix.
-              - :code:`formula`: patsy formula used in creating design matrix.
-              - :code:`coefficients`: ElasticNetCV coefficients.
-              - :code:`intercept`: ElasticNetCV intercept.
-
         Returns
         -------
         output : pandas.DataFrame
@@ -205,36 +204,68 @@ class NormalHMMModel(object):
         '''
         # needs only tempF
         if params is None:
+            # TODO: Use/check this object for stored fit results.
+            # Otherwise, error!
             params = self.params
+
+            if params is None:
+                raise ValueError("No stored or passed fit params")
 
         model_data = demand_fixture_data.resample(self.model_freq).agg(
                 {'tempF': np.mean})
 
-        model_data.loc[:, 'CDD'] = np.maximum(model_data.tempF -
-                                              self.cooling_base_temp, 0.)
-        model_data.loc[:, 'HDD'] = np.maximum(self.heating_base_temp -
-                                              model_data.tempF, 0.)
+        model_data.loc[:, 'CDD'] = np.fmax(model_data.tempF -
+                                           self.cooling_base_temp, 0.)
+        model_data.loc[:, 'HDD'] = np.fmax(self.heating_base_temp -
+                                           model_data.tempF, 0.)
 
-        holiday_names = self._holidays_indexed(model_data.index)
+        X_matrices = []
+        for design_info in self.params['X_design_infos']:
+            design_info = params["X_design_info"]
 
-        model_data.loc[:, 'holiday_name'] = holiday_names
+            (X,) = patsy.build_design_matrices([design_info],
+                                               model_data,
+                                               return_type='dataframe')
+            X_matrices += [X]
 
-        design_info = params["X_design_info"]
+        # TODO FIXME: Setup initial values for stochastics from
+        # previous sample results...
+        init_params = self.params['init_params']
 
-        (X,) = patsy.build_design_matrices([design_info],
-                                           model_data,
-                                           return_type='dataframe')
+        # Creating the model with None observations should
+        # give a (non-observed) stochastic for the observations
+        # variable, 'y_rv'.  We can use that for posterior predictive
+        # samples.
+        norm_hmm = make_normal_hmm(None, X_matrices, init_params)
 
-        model_obj = linear_model.ElasticNetCV(l1_ratio=self.l1_ratio,
-                                              fit_intercept=False)
+        mcmc_step = pymc.MCMC(norm_hmm.variables)
 
-        model_obj.coef_ = params["coefficients"]
-        model_obj.intercept_ = params["intercept"]
+        # Set the stochastic values to their previous sampled values.
+        # TODO: Do this a better way.
+        last_samples = self.params['last_samples']
+        for stoch in mcmc_step.stochastics:
+            last_value = last_samples.get(stoch.__name__, None)
+            if last_value is not None:
+                stoch.value = last_value
 
-        predicted = pd.Series(model_obj.predict(X), index=X.index)
+        mcmc_step.use_step_method(HMMStatesStep, norm_hmm.states)
+        mcmc_step.use_step_method(TransProbMatStep, norm_hmm.trans_mat)
+        for b_ in norm_hmm.betas:
+            mcmc_step.use_step_method(NormalNormalStep, b_)
 
-        # add NaNs back in
-        predicted = predicted.reindex(model_data.index)
+        mcmc_step.sample(mcmc_iters)
+
+        # We're not really using posterior predictive values.
+        # Use them if you want error estimates (e.g. form HPD region
+        # or quantiles of samples from 'y_rv' variable).
+        # More specifically,
+        #   predict_low, predict_high = mcmc_step.stats('y_rv')['y_rv']['95% HPD interval']
+        mu_samples = pd.DataFrame(mcmc_step.trace('mu')[:].T,
+                                  index=model_data.tempF.index)
+
+        estimated = mu_samples.mean(axis=1)
+
+        predicted = pd.Series(estimated, index=model_data.index)
 
         return predicted
 
