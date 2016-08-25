@@ -4,10 +4,9 @@ import numpy as np
 import pandas as pd
 import patsy
 import pymc
-from scipy.stats import chi2
 import sklearn.metrics as skm
 
-from amimodels.normal_hmm import *
+from amimodels.normal_hmm import (gmm_norm_hmm_init_params, make_normal_hmm)
 from amimodels.step_methods import (TransProbMatStep, HMMStatesStep,
                                     NormalNormalStep)
 
