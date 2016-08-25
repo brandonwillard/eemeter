@@ -3,6 +3,7 @@ import warnings
 import numpy as np
 import pandas as pd
 import patsy
+import pymc
 from scipy.stats import chi2
 import sklearn.metrics as skm
 
@@ -31,7 +32,7 @@ class NormalHMMModel(object):
 
         self.model_freq = pd.tseries.frequencies.Day()
         self.base_reg_formula = 'energy ~ 1 + CDD + HDD + CDD:HDD'
-        self.mcmc_iters = 1000
+        self.mcmc_samples = 100
         self.params = None
         self.X_matrices = None
         self.y = None
@@ -127,7 +128,7 @@ class NormalHMMModel(object):
         for b_ in norm_hmm.betas:
             mcmc_step.use_step_method(NormalNormalStep, b_)
 
-        mcmc_step.sample(mcmc_iters)
+        mcmc_step.sample(self.mcmc_samples)
 
         mu_samples = pd.DataFrame(mcmc_step.trace('mu')[:].T,
                                   index=model_data.tempF.index)
@@ -164,7 +165,8 @@ class NormalHMMModel(object):
 
         # TODO: These parameters don't apply anymore; what should
         # they be/do?
-        last_samples = {v.__name__: v.trace()[-1] for v in mcmc_step.stochastics}
+        last_samples = {v.__name__: v.trace()[-1]
+                        for v in mcmc_step.stochastics}
         self.params = {
             # We're dealing with samples now; use those, or their means?
             # We'll use the last sample for each stochastic for now.
@@ -221,8 +223,6 @@ class NormalHMMModel(object):
 
         X_matrices = []
         for design_info in self.params['X_design_infos']:
-            design_info = params["X_design_info"]
-
             (X,) = patsy.build_design_matrices([design_info],
                                                model_data,
                                                return_type='dataframe')
@@ -248,12 +248,9 @@ class NormalHMMModel(object):
             if last_value is not None:
                 stoch.value = last_value
 
-        mcmc_step.use_step_method(HMMStatesStep, norm_hmm.states)
-        mcmc_step.use_step_method(TransProbMatStep, norm_hmm.trans_mat)
-        for b_ in norm_hmm.betas:
-            mcmc_step.use_step_method(NormalNormalStep, b_)
+        mcmc_step.assign_step_methods()
 
-        mcmc_step.sample(mcmc_iters)
+        mcmc_step.sample(self.mcmc_samples)
 
         # We're not really using posterior predictive values.
         # Use them if you want error estimates (e.g. form HPD region
