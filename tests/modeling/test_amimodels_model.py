@@ -63,7 +63,7 @@ def test_basic(input_df):
     assert "n" in output
 
     assert 'init_params' in m.params
-    assert 'last_samples' in m.params
+    assert 'stoch_traces' in m.params
     assert 'X_design_infos' in m.params
     assert m.r2 == 0.0
     assert m.rmse <= 0.002
@@ -75,7 +75,7 @@ def test_basic(input_df):
     assert_allclose(predict[datetime(2000, 1, 1, tzinfo=pytz.UTC)], 0.9989697)
 
     assert 'init_params' in m.params
-    assert 'last_samples' in m.params
+    assert 'stoch_traces' in m.params
     assert 'X_design_infos' in m.params
     assert m.r2 == 0.0
     assert m.rmse <= 0.002

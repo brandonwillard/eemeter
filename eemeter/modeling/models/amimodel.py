@@ -6,7 +6,8 @@ import patsy
 import pymc
 import sklearn.metrics as skm
 
-from amimodels.normal_hmm import (gmm_norm_hmm_init_params, make_normal_hmm)
+from amimodels.normal_hmm import (gmm_norm_hmm_init_params, make_normal_hmm,
+                                  trace_sampler)
 from amimodels.step_methods import (TransProbMatStep, HMMStatesStep,
                                     NormalNormalStep)
 
@@ -164,13 +165,13 @@ class NormalHMMModel(object):
 
         # TODO: These parameters don't apply anymore; what should
         # they be/do?
-        last_samples = {v.__name__: v.trace()[-1]
-                        for v in mcmc_step.stochastics}
+        stoch_traces = {v.__name__: v.trace()
+                        for v in norm_hmm.mu.extended_parents}
         self.params = {
             # We're dealing with samples now; use those, or their means?
             # We'll use the last sample for each stochastic for now.
             "init_params": init_params,
-            "last_samples": last_samples,
+            "stoch_traces": stoch_traces,
             "X_design_infos": [X_.design_info for X_ in X_matrices],
         }
 
@@ -237,26 +238,9 @@ class NormalHMMModel(object):
         # samples.
         norm_hmm = make_normal_hmm(None, X_matrices, init_params)
 
-        mcmc_step = pymc.MCMC(norm_hmm.variables)
+        ram_db = trace_sampler(norm_hmm, 'mu', self.params['stoch_traces'])
 
-        # Set the stochastic values to their previous sampled values.
-        # TODO: Do this a better way.
-        last_samples = self.params['last_samples']
-        for stoch in mcmc_step.stochastics:
-            last_value = last_samples.get(stoch.__name__, None)
-            if last_value is not None:
-                stoch.value = last_value
-
-        mcmc_step.assign_step_methods()
-
-        mcmc_step.sample(self.mcmc_samples)
-
-        # We're not really using posterior predictive values.
-        # Use them if you want error estimates (e.g. form HPD region
-        # or quantiles of samples from 'y_rv' variable).
-        # More specifically,
-        #   predict_low, predict_high = mcmc_step.stats('y_rv')['y_rv']['95% HPD interval']
-        mu_samples = pd.DataFrame(mcmc_step.trace('mu')[:].T,
+        mu_samples = pd.DataFrame(ram_db.trace('mu').gettrace().T,
                                   index=model_data.tempF.index)
 
         estimated = mu_samples.mean(axis=1)
