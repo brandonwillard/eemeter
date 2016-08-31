@@ -87,7 +87,7 @@ class NormalHMMModel(object):
 
         #model_data = model_data.dropna()
 
-        if model_data.empty:
+        if model_data.dropna().empty:
             raise ValueError("No model data (consumption + weather)")
 
         model_data = model_data.assign(CDD=np.fmax(model_data.tempF -
@@ -140,8 +140,7 @@ class NormalHMMModel(object):
             mcmc_step.use_step_method(pymc.StepMethods.Metropolis,
                                       e_, proposal_distribution='Prior')
 
-        for y_ in chain(norm_hmm.etas, norm_hmm.y_pp):
-            mcmc_step.use_step_method(PriorObsSampler, y_)
+        mcmc_step.use_step_method(PriorObsSampler, norm_hmm.y_pp_rv)
 
         mcmc_step.sample(self.mcmc_samples, burn=int(self.mcmc_samples/4.))
 
@@ -171,7 +170,7 @@ class NormalHMMModel(object):
         #                          index=y.index).reindex(model_data.index)
 
         # These are the bounds for the observations:
-        pp_stats = norm_hmm.y_pp.stats()
+        pp_stats = norm_hmm.y_pp_rv.stats()
         self.lower = pd.DataFrame(pp_stats['quantiles'][2.5],
                                   index=y.index).reindex(model_data.index)
         self.upper = pd.DataFrame(pp_stats['quantiles'][97.5],

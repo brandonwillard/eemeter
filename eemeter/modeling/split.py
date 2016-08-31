@@ -63,6 +63,8 @@ class SplitModeledEnergyTrace(object):
                 input_data = self.formatter.create_input(
                     filtered_trace, weather_source)
             except:
+                import sys
+                exc_info = sys.exc_info()
                 logger.warn(
                     'For trace "{}" and modeling_period "{}", was not'
                     ' able to format input data for {}.'
@@ -75,6 +77,7 @@ class SplitModeledEnergyTrace(object):
                     "start_date": None,
                     "end_date": None,
                     "rows": None,
+                    "exc_info": exc_info,
                 }
                 continue
             else:
