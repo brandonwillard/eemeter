@@ -13,7 +13,6 @@ from eemeter.modeling.formatters import ModelDataFormatter
 from eemeter.structures import EnergyTrace
 from eemeter.modeling.models import NormalHMMModel
 
-from amimodels.testing import assert_hpd
 
 @pytest.fixture
 def mock_isd_weather_source():
@@ -73,7 +72,8 @@ def test_basic(input_df):
     predict = m.predict(input_df)
 
     assert predict.shape == (365,)
-    assert_allclose(predict[datetime(2000, 1, 1, tzinfo=pytz.UTC)], 1., atol=0.1)
+    assert_allclose(predict[datetime(2000, 1, 1, tzinfo=pytz.UTC)],
+                    1., atol=0.1)
 
     assert 'init_params' in m.params
     assert 'stoch_traces' in m.params

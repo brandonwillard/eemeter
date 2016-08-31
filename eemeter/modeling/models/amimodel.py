@@ -1,15 +1,17 @@
 import warnings
 
+from itertools import chain
+
 import numpy as np
 import pandas as pd
 import patsy
 import pymc
 import sklearn.metrics as skm
 
-from amimodels.normal_hmm import (gmm_norm_hmm_init_params, make_normal_hmm,
-                                  trace_sampler)
+from amimodels.normal_hmm import (make_normal_hmm, trace_sampler,
+                                  get_stochs_excluding)
 from amimodels.step_methods import (TransProbMatStep, HMMStatesStep,
-                                    NormalNormalStep)
+                                    NormalNormalStep, GammaNormalStep)
 
 
 class NormalHMMModel(object):
@@ -25,14 +27,15 @@ class NormalHMMModel(object):
         Base temperature (degrees F) used in calculating heating degree days.
     '''
 
-    def __init__(self, cooling_base_temp, heating_base_temp):
+    def __init__(self, cooling_base_temp,
+                 heating_base_temp, mcmc_samples=1000):
 
         self.cooling_base_temp = cooling_base_temp
         self.heating_base_temp = heating_base_temp
 
         self.model_freq = pd.tseries.frequencies.Day()
         self.base_reg_formula = 'energy ~ 1 + CDD + HDD + CDD:HDD'
-        self.mcmc_samples = 100
+        self.mcmc_samples = mcmc_samples
         self.params = None
         self.X_matrices = None
         self.y = None
@@ -40,7 +43,6 @@ class NormalHMMModel(object):
         self.r2 = None
         self.rmse = None
         self.cvrmse = None
-        self.n = None
 
     def __repr__(self):
         return (
@@ -77,7 +79,6 @@ class NormalHMMModel(object):
               (Coefficient of variation of root mean square error).
             - :code:`"upper"`: self.upper,
             - :code:`"lower"`: self.lower,
-            - :code:`"n"`: self.n
         '''
         # convert to daily
         model_data = input_data.resample(self.model_freq).agg(
@@ -111,6 +112,7 @@ class NormalHMMModel(object):
             + C(tempF.index.weekday)\
             '''
 
+        # Single constant state and regression state.
         formulas = ["energy ~ 1", regression_formula]
         X_matrices = []
         for formula in formulas:
@@ -118,7 +120,7 @@ class NormalHMMModel(object):
                                    return_type='dataframe')
             X_matrices += [X]
 
-        init_params = gmm_norm_hmm_init_params(y, X_matrices)
+        init_params = None  # gmm_norm_hmm_init_params(y, X_matrices)
         norm_hmm = make_normal_hmm(y, X_matrices, init_params)
 
         mcmc_step = pymc.MCMC(norm_hmm.variables)
@@ -128,10 +130,16 @@ class NormalHMMModel(object):
         for b_ in norm_hmm.betas:
             mcmc_step.use_step_method(NormalNormalStep, b_)
 
+        for V_ in norm_hmm.V_invs:
+            mcmc_step.use_step_method(GammaNormalStep, V_)
+
+        for e_ in chain(norm_hmm.etas, norm_hmm.lambdas):
+            mcmc_step.use_step_method(pymc.StepMethods.Metropolis,
+                                      e_, proposal_distribution='Prior')
+
         mcmc_step.sample(self.mcmc_samples)
 
-        mu_samples = pd.DataFrame(mcmc_step.trace('mu')[:].T,
-                                  index=model_data.tempF.index)
+        mu_samples = pd.DataFrame(norm_hmm.mu.trace().T, index=y.index)
 
         estimated = mu_samples.mean(axis=1)
 
@@ -139,13 +147,15 @@ class NormalHMMModel(object):
         self.y = y
         self.estimated = estimated
 
-        hmm_r2_samples = mu_samples.apply(lambda x: skm.r2_score(y, x),
-                                          axis=0)
+        hmm_r2_samples = mu_samples.apply(lambda x: skm.r2_score(y, x), axis=0)
         r2 = hmm_r2_samples.mean()
 
         rmse = ((y.values.ravel() - estimated)**2).mean()**.5
 
-        if y.mean != 0:
+        # XXX: Reindex last; otherwise, some indices might not match.
+        estimated = estimated.reindex(model_data.index)
+
+        if y.values.ravel().mean() != 0:
             cvrmse = rmse / float(y.values.ravel().mean())
         else:
             cvrmse = np.nan
@@ -154,22 +164,20 @@ class NormalHMMModel(object):
         self.rmse = rmse
         self.cvrmse = cvrmse
 
-        n = self.estimated.shape[0]
-
         # or we could use ...['quantiles']
-        self.lower, self.upper = mcmc_step.stats('mu')['mu']['95% HPD interval']
-        self.n = n
+        lower, upper = norm_hmm.mu.stats()['95% HPD interval']
+        self.lower = lower
+        self.upper = upper
 
         self.plot()
 
+        # Collect all the traces needed for 'mu'.
+        non_time_parents = get_stochs_excluding(norm_hmm.mu, set(('states', 'N_obs')))
+        stoch_traces = {}
+        for stoch in non_time_parents:
+            stoch_traces[stoch.__name__] = stoch.trace()
 
-        # TODO: These parameters don't apply anymore; what should
-        # they be/do?
-        stoch_traces = {v.__name__: v.trace()
-                        for v in norm_hmm.mu.extended_parents}
         self.params = {
-            # We're dealing with samples now; use those, or their means?
-            # We'll use the last sample for each stochastic for now.
             "init_params": init_params,
             "stoch_traces": stoch_traces,
             "X_design_infos": [X_.design_info for X_ in X_matrices],
@@ -182,7 +190,6 @@ class NormalHMMModel(object):
             "cvrmse": self.cvrmse,
             "upper": self.upper,
             "lower": self.lower,
-            "n": self.n
         }
         return output
 
@@ -204,6 +211,9 @@ class NormalHMMModel(object):
             Dataframe of energy values as given by the fitted model across the
             index given in :code:`demand_fixture_data`.
         '''
+
+        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
+
         # needs only tempF
         if params is None:
             # TODO: Use/check this object for stored fit results.
@@ -241,11 +251,12 @@ class NormalHMMModel(object):
         ram_db = trace_sampler(norm_hmm, 'mu', self.params['stoch_traces'])
 
         mu_samples = pd.DataFrame(ram_db.trace('mu').gettrace().T,
-                                  index=model_data.tempF.index)
+                                  index=X_matrices[0].index)
 
         estimated = mu_samples.mean(axis=1)
 
-        predicted = pd.Series(estimated, index=model_data.index)
+        predicted = pd.Series(estimated, index=X_matrices[0].index)
+        predicted = predicted.reindex(model_data.index)
 
         return predicted
 

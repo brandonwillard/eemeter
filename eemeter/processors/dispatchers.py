@@ -2,7 +2,8 @@ import logging
 
 import pandas as pd
 
-from eemeter.modeling.models.seasonal import SeasonalElasticNetCVModel
+from eemeter.modeling.models import NormalHMMModel
+#from eemeter.modeling.models.seasonal import SeasonalElasticNetCVModel
 from eemeter.modeling.models.billing import BillingElasticNetCVModel
 from eemeter.modeling.formatters import (
     ModelDataFormatter,
@@ -19,10 +20,16 @@ default_dispatch = (
     {
         'freq_str': 'D'
     },
-    SeasonalElasticNetCVModel,
+    #SeasonalElasticNetCVModel,
+    #{
+    #    'cooling_base_temp': 65,
+    #    'heating_base_temp': 65,
+    #},
+    NormalHMMModel,
     {
         'cooling_base_temp': 65,
         'heating_base_temp': 65,
+        'mcmc_samples': 100,
     },
 )
 
@@ -30,10 +37,16 @@ default_dispatch = (
 billing_dispatch = (
     ModelDataBillingFormatter,
     {},
-    BillingElasticNetCVModel,
+    #BillingElasticNetCVModel,
+    #{
+    #    'cooling_base_temp': 65,
+    #    'heating_base_temp': 65,
+    #},
+    NormalHMMModel,
     {
         'cooling_base_temp': 65,
         'heating_base_temp': 65,
+        'mcmc_samples': 100,
     },
 )
 
