@@ -89,10 +89,10 @@ class NormalHMMModel(object):
         if model_data.empty:
             raise ValueError("No model data (consumption + weather)")
 
-        model_data.loc[:, 'CDD'] = np.fmax(model_data.tempF -
-                                           self.cooling_base_temp, 0.)
-        model_data.loc[:, 'HDD'] = np.fmax(self.heating_base_temp -
-                                           model_data.tempF, 0.)
+        model_data = model_data.assign(CDD=np.fmax(model_data.tempF -
+                                                   self.cooling_base_temp, 0.),
+                                       HDD=np.fmax(self.heating_base_temp -
+                                                   model_data.tempF, 0.))
 
         regression_formula = self.base_reg_formula
 
@@ -137,26 +137,34 @@ class NormalHMMModel(object):
             mcmc_step.use_step_method(pymc.StepMethods.Metropolis,
                                       e_, proposal_distribution='Prior')
 
-        mcmc_step.sample(self.mcmc_samples)
+        mcmc_step.sample(self.mcmc_samples, burn=int(self.mcmc_samples/4.))
 
         mu_samples = pd.DataFrame(norm_hmm.mu.trace().T, index=y.index)
 
-        estimated = mu_samples.mean(axis=1)
+        estimated_stats = norm_hmm.mu.stats()
 
         self.X_matrices = X_matrices
         self.y = y
-        self.estimated = estimated
 
-        hmm_r2_samples = mu_samples.apply(lambda x: skm.r2_score(y, x), axis=0)
-        r2 = hmm_r2_samples.mean()
+        #abs_err_samples = np.abs(mu_samples.sub(y.squeeze(), axis=0)).mean(axis=1).mean()
+        r2_samples = mu_samples.apply(lambda x: skm.r2_score(y, x), axis=0)
+        r2 = r2_samples.mean()
 
-        rmse = ((y.values.ravel() - estimated)**2).mean()**.5
+        estimated = pd.DataFrame(estimated_stats['quantiles'][50.0],
+                                 index=y.index)
+
+        rmse = ((y.squeeze() - estimated.squeeze())**2).mean()**.5
 
         # XXX: Reindex last; otherwise, some indices might not match.
-        estimated = estimated.reindex(model_data.index)
+        self.estimated = estimated.reindex(model_data.index)
+        self.lower = pd.DataFrame(estimated_stats['quantiles'][2.5],
+                                  index=y.index).reindex(model_data.index)
+        self.upper = pd.DataFrame(estimated_stats['quantiles'][97.5],
+                                  index=y.index).reindex(model_data.index)
 
-        if y.values.ravel().mean() != 0:
-            cvrmse = rmse / float(y.values.ravel().mean())
+        y_mean = y.values.ravel().mean()
+        if y_mean != 0:
+            cvrmse = rmse / float(y_mean)
         else:
             cvrmse = np.nan
 
@@ -164,15 +172,11 @@ class NormalHMMModel(object):
         self.rmse = rmse
         self.cvrmse = cvrmse
 
-        # or we could use ...['quantiles']
-        lower, upper = norm_hmm.mu.stats()['95% HPD interval']
-        self.lower = lower
-        self.upper = upper
-
         self.plot()
 
         # Collect all the traces needed for 'mu'.
-        non_time_parents = get_stochs_excluding(norm_hmm.mu, set(('states', 'N_obs')))
+        non_time_parents = get_stochs_excluding(norm_hmm.mu,
+                                                set(('states', 'N_obs')))
         stoch_traces = {}
         for stoch in non_time_parents:
             stoch_traces[stoch.__name__] = stoch.trace()
@@ -224,10 +228,10 @@ class NormalHMMModel(object):
         model_data = demand_fixture_data.resample(self.model_freq).agg(
                 {'tempF': np.mean})
 
-        model_data.loc[:, 'CDD'] = np.fmax(model_data.tempF -
-                                           self.cooling_base_temp, 0.)
-        model_data.loc[:, 'HDD'] = np.fmax(self.heating_base_temp -
-                                           model_data.tempF, 0.)
+        model_data = model_data.assign(CDD=np.fmax(model_data.tempF -
+                                                   self.cooling_base_temp, 0.),
+                                       HDD=np.fmax(self.heating_base_temp -
+                                                   model_data.tempF, 0.))
 
         X_matrices = []
         for design_info in self.params['X_design_infos']:
@@ -274,11 +278,11 @@ class NormalHMMModel(object):
         self.estimated.plot(color='b', alpha=0.7)
 
         plt.fill_between(self.estimated.index.to_datetime(),
-                         self.estimated + self.upper,
-                         self.estimated - self.lower,
-                         color='b', alpha=0.3)
-
-        pd.Series(self.y.values.ravel(), index=self.estimated.index).plot(
-                  color='k', linewidth=1.5)
+                         (self.estimated - self.upper).squeeze(),
+                         (self.estimated + self.lower).squeeze(),
+                         color='b', alpha=0.3,
+                         where=np.isfinite(self.estimated.values.squeeze()))
+        y_plot = self.y.squeeze().reindex(self.estimated.index)
+        y_plot.plot(color='k', linewidth=1.5)
 
         plt.show()
