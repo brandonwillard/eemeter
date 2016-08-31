@@ -278,8 +278,8 @@ class NormalHMMModel(object):
         self.estimated.plot(color='b', alpha=0.7)
 
         plt.fill_between(self.estimated.index.to_datetime(),
-                         (self.estimated - self.upper).squeeze(),
-                         (self.estimated + self.lower).squeeze(),
+                         self.lower.squeeze(),
+                         self.upper.squeeze(),
                          color='b', alpha=0.3,
                          where=np.isfinite(self.estimated.values.squeeze()))
         y_plot = self.y.squeeze().reindex(self.estimated.index)
