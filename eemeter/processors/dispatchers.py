@@ -29,7 +29,7 @@ default_dispatch = (
     {
         'cooling_base_temp': 65,
         'heating_base_temp': 65,
-        'mcmc_samples': 100,
+        'mcmc_samples': 1000,
     },
 )
 
@@ -46,7 +46,7 @@ billing_dispatch = (
     {
         'cooling_base_temp': 65,
         'heating_base_temp': 65,
-        'mcmc_samples': 100,
+        'mcmc_samples': 1000,
     },
 )
 

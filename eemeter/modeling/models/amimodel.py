@@ -212,8 +212,6 @@ class NormalHMMModel(object):
             index given in :code:`demand_fixture_data`.
         '''
 
-        import ipdb; ipdb.set_trace()  # XXX BREAKPOINT
-
         # needs only tempF
         if params is None:
             # TODO: Use/check this object for stored fit results.
