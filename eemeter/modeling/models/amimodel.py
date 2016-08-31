@@ -11,7 +11,8 @@ import sklearn.metrics as skm
 from amimodels.normal_hmm import (make_normal_hmm, trace_sampler,
                                   get_stochs_excluding)
 from amimodels.step_methods import (TransProbMatStep, HMMStatesStep,
-                                    NormalNormalStep, GammaNormalStep)
+                                    NormalNormalStep, GammaNormalStep,
+                                    PriorObsSampler)
 
 
 class NormalHMMModel(object):
@@ -121,7 +122,9 @@ class NormalHMMModel(object):
             X_matrices += [X]
 
         init_params = None  # gmm_norm_hmm_init_params(y, X_matrices)
-        norm_hmm = make_normal_hmm(y, X_matrices, init_params)
+
+        norm_hmm = make_normal_hmm(y, X_matrices, init_params,
+                                   include_ppy=True)
 
         mcmc_step = pymc.MCMC(norm_hmm.variables)
 
@@ -136,6 +139,9 @@ class NormalHMMModel(object):
         for e_ in chain(norm_hmm.etas, norm_hmm.lambdas):
             mcmc_step.use_step_method(pymc.StepMethods.Metropolis,
                                       e_, proposal_distribution='Prior')
+
+        for y_ in chain(norm_hmm.etas, norm_hmm.y_pp):
+            mcmc_step.use_step_method(PriorObsSampler, y_)
 
         mcmc_step.sample(self.mcmc_samples, burn=int(self.mcmc_samples/4.))
 
@@ -157,9 +163,18 @@ class NormalHMMModel(object):
 
         # XXX: Reindex last; otherwise, some indices might not match.
         self.estimated = estimated.reindex(model_data.index)
-        self.lower = pd.DataFrame(estimated_stats['quantiles'][2.5],
+
+        # These are the bounds for the observation mean:
+        #self.lower = pd.DataFrame(estimated_stats['quantiles'][2.5],
+        #                          index=y.index).reindex(model_data.index)
+        #self.upper = pd.DataFrame(estimated_stats['quantiles'][97.5],
+        #                          index=y.index).reindex(model_data.index)
+
+        # These are the bounds for the observations:
+        pp_stats = norm_hmm.y_pp.stats()
+        self.lower = pd.DataFrame(pp_stats['quantiles'][2.5],
                                   index=y.index).reindex(model_data.index)
-        self.upper = pd.DataFrame(estimated_stats['quantiles'][97.5],
+        self.upper = pd.DataFrame(pp_stats['quantiles'][97.5],
                                   index=y.index).reindex(model_data.index)
 
         y_mean = y.values.ravel().mean()

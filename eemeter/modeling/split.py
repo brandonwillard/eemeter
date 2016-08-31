@@ -88,6 +88,8 @@ class SplitModeledEnergyTrace(object):
             try:
                 outputs.update(model.fit(input_data))
             except:
+                import sys
+                exc_info = sys.exc_info()
                 logger.warn(
                     'For trace "{}" and modeling_period "{}", {} was not'
                     ' able to fit using input data: {}'
@@ -98,6 +100,7 @@ class SplitModeledEnergyTrace(object):
                 outputs.update({
                     "status": "FAILURE",
                     "traceback": traceback.format_exc(),
+                    "exc_info": exc_info,
                 })
             else:
                 logger.info(
