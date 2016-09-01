@@ -106,18 +106,20 @@ class NormalHMMModel(object):
         # Make sure these factors have enough levels to not
         # cause issues.
         if len(np.unique(model_data.index.month)) >= 12:
-            regression_formula += '''\
-            + CDD * C(tempF.index.month) \
-            + HDD * C(tempF.index.month) \
-            + C(tempF.index.month) \
-            '''
+            regression_formula += ' + cc(tempF.index.month, df=12) '
+            #regression_formula += '''\
+            #+ CDD * C(tempF.index.month) \
+            #+ HDD * C(tempF.index.month) \
+            #+ C(tempF.index.month) \
+            #'''
 
-        if len(np.unique(model_data.index.weekday)) >= 7:
-            regression_formula += '''\
-            + (CDD) * C(tempF.index.weekday) \
-            + (HDD) * C(tempF.index.weekday) \
-            + C(tempF.index.weekday)\
-            '''
+        #if len(np.unique(model_data.index.weekday)) >= 7:
+        #    regression_formula += ' + cc(tempF.index.weekday, df=12) '
+        #    #regression_formula += '''\
+        #    #+ (CDD) * C(tempF.index.weekday) \
+        #    #+ (HDD) * C(tempF.index.weekday) \
+        #    #+ C(tempF.index.weekday)\
+        #    #'''
 
         # Single constant state and regression state.
         formulas = ["energy ~ 1", regression_formula]
