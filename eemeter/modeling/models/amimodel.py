@@ -69,17 +69,23 @@ class NormalHMMModel(object):
             - :code:`"r2"`: R-squared value from this fit.
             - :code:`"model_params"`: Fitted parameters.
 
+              - :code:`initial_values`: initial values for the model.
+                Mostly consists of hyper-parameter values and initial
+                stochastic values.
               - :code:`X_design_matrix`: patsy design matrix used in
                 formatting design matrix.
-              - :code:`formula`: patsy formula used in creating design matrix.
-              - :code:`coefficients`: ElasticNetCV coefficients.
-              - :code:`intercept`: ElasticNetCV intercept.
+              - :code:`stoch_traces`: dict of numpy arrays for each
+                stochastic needed to sample new predictive values
+                (i.e. needed to sample the observation mean, ``mu``,
+                pymc object).
 
             - :code:`"rmse"`: Root mean square error
             - :code:`"cvrmse"`: Normalized root mean square error
               (Coefficient of variation of root mean square error).
-            - :code:`"upper"`: self.upper,
-            - :code:`"lower"`: self.lower,
+            - :code:`"upper"`: self.y_upper, the upper %95 quantile of
+                the observation variable's posterior samples.
+            - :code:`"lower"`: self.y_lower, the lower %95 quantile of
+                the observation variable's posterior samples.
         '''
         # convert to daily
         model_data = input_data.resample(self.model_freq).agg(
@@ -155,8 +161,8 @@ class NormalHMMModel(object):
         r2_samples = mu_samples.apply(lambda x: skm.r2_score(y, x), axis=0)
         r2 = r2_samples.mean()
 
-        estimated = pd.DataFrame(estimated_stats['quantiles'][50.0],
-                                 index=y.index)
+        estimated = pd.Series(estimated_stats['quantiles'][50.0],
+                              index=y.index, name='estimated')
 
         rmse = ((y.squeeze() - estimated.squeeze())**2).mean()**.5
 
@@ -164,10 +170,10 @@ class NormalHMMModel(object):
         self.estimated = estimated.reindex(model_data.index)
 
         # These are the bounds for the observation mean:
-        #self.lower = pd.DataFrame(estimated_stats['quantiles'][2.5],
-        #                          index=y.index).reindex(model_data.index)
-        #self.upper = pd.DataFrame(estimated_stats['quantiles'][97.5],
-        #                          index=y.index).reindex(model_data.index)
+        self.mu_lower = pd.DataFrame(estimated_stats['quantiles'][2.5],
+                                     index=y.index).reindex(model_data.index)
+        self.mu_upper = pd.DataFrame(estimated_stats['quantiles'][97.5],
+                                     index=y.index).reindex(model_data.index)
 
         # These are the bounds for the observations:
         pp_stats = norm_hmm.y_pp_rv.stats()
@@ -197,8 +203,8 @@ class NormalHMMModel(object):
 
         self.params = {
             "init_params": init_params,
-            "stoch_traces": stoch_traces,
             "X_design_infos": [X_.design_info for X_ in X_matrices],
+            "stoch_traces": stoch_traces,
         }
 
         output = {
@@ -271,7 +277,8 @@ class NormalHMMModel(object):
 
         estimated = mu_samples.mean(axis=1)
 
-        predicted = pd.Series(estimated, index=X_matrices[0].index)
+        predicted = pd.Series(estimated, index=X_matrices[0].index,
+                              name='predicted')
         predicted = predicted.reindex(model_data.index)
 
         return predicted
@@ -295,8 +302,16 @@ class NormalHMMModel(object):
                          self.lower.squeeze(),
                          self.upper.squeeze(),
                          color='b', alpha=0.3,
-                         where=np.isfinite(self.estimated.values.squeeze()))
+                         where=np.isfinite(self.estimated.values.squeeze()),
+                         label=r'y posterior %95')
+        plt.fill_between(self.estimated.index.to_datetime(),
+                         self.mu_lower.squeeze(),
+                         self.mu_upper.squeeze(),
+                         color='r', alpha=0.3,
+                         where=np.isfinite(self.estimated.values.squeeze()),
+                         label=r'mu posterior %95')
         y_plot = self.y.squeeze().reindex(self.estimated.index)
         y_plot.plot(color='k', linewidth=1.5)
 
+        plt.legend()
         plt.show()
