@@ -107,19 +107,9 @@ class NormalHMMModel(object):
         # cause issues.
         if len(np.unique(model_data.index.month)) >= 12:
             regression_formula += ' + cc(tempF.index.month, df=12) '
-            #regression_formula += '''\
-            #+ CDD * C(tempF.index.month) \
-            #+ HDD * C(tempF.index.month) \
-            #+ C(tempF.index.month) \
-            #'''
 
         #if len(np.unique(model_data.index.weekday)) >= 7:
         #    regression_formula += ' + cc(tempF.index.weekday, df=12) '
-        #    #regression_formula += '''\
-        #    #+ (CDD) * C(tempF.index.weekday) \
-        #    #+ (HDD) * C(tempF.index.weekday) \
-        #    #+ C(tempF.index.weekday)\
-        #    #'''
 
         # Single constant state and regression state.
         formulas = ["energy ~ 1", regression_formula]
@@ -134,10 +124,17 @@ class NormalHMMModel(object):
         norm_hmm = make_normal_hmm(y, X_matrices, init_params,
                                    include_ppy=True)
 
+        # Some very basic, generic initializations for the state parameters.
+        norm_hmm.betas[0].value = 0
+        b1_0 = norm_hmm.betas[1].value.copy()
+        b1_0[0] = float(y.mean())
+        norm_hmm.betas[1].value = b1_0
+
         mcmc_step = pymc.MCMC(norm_hmm.variables)
 
         mcmc_step.use_step_method(HMMStatesStep, norm_hmm.states)
         mcmc_step.use_step_method(TransProbMatStep, norm_hmm.trans_mat)
+
         for b_ in norm_hmm.betas:
             mcmc_step.use_step_method(NormalNormalStep, b_)
 
